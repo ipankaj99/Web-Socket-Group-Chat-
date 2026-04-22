@@ -1,24 +1,35 @@
 import React, { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
-// Keeping your logic exactly as is
 const socket = io("http://localhost:5000", {
-  auth: { token: "deepak" },
+  auth: { token: "pankaj" },
   autoConnect: false,
 });
 
-const MY_USER_ID = "deepak";
+const MY_USER_ID = "pankaj";
 
 function App() {
   const [message, setMessage] = useState("");
   const [received, setReceived] = useState([]);
   const [error, setError] = useState(null);
+  const [typing, setTyping] = useState("");
+
   const chatEndRef = useRef(null);
+  const chatRef=useRef(false);
+  const typingTimerRef = useRef(null);
+  const [userOnline, setUserOnline]=useState(0);
 
   useEffect(() => {
     socket.on("connect", () => {
-      socket.emit("join_group", { groupId: "messages" });
+      socket.emit("join_group", {
+        groupId: "messages",
+        userId: MY_USER_ID,
+      });
     });
+
+    socket.on('online_count', (data)=>{
+      setUserOnline(data);
+    })
 
     socket.on("receive_message", (data) => {
       if (data.userId === MY_USER_ID) return;
@@ -33,14 +44,36 @@ function App() {
       setError(err);
     });
 
+    socket.on("typing_message", (data) => {
+      if (data.userId === MY_USER_ID) return;
+      setTyping(`${data.userId} is typing...`);
+    });
+
+    socket.on("stop_typing", () => {
+      setTyping("");
+    });
+
     socket.connect();
+
+    socket.on("disconnect", () => {
+      console.log("disconnected");
+    });
 
     return () => {
       socket.off("connect");
       socket.off("receive_message");
       socket.off("get_message");
       socket.off("error_message");
+      socket.off("typing_message");
+      socket.off("stop_typing");
+      socket.off("disconnect");
+      socket.off('online_count');
+
       socket.disconnect();
+
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+      }
     };
   }, []);
 
@@ -50,68 +83,174 @@ function App() {
 
   const sendMessage = () => {
     if (!message.trim()) return;
+
     const newMsg = { userId: MY_USER_ID, message };
     setReceived((prev) => [...prev, newMsg]);
+
     socket.emit("private_message", {
       message,
       groupId: "messages",
     });
+
+    socket.emit("stop_typing", {
+      groupId: "messages",
+      userId: MY_USER_ID,
+    });
+
     setMessage("");
+    setTyping("");
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") sendMessage();
-  };
+  const handleMessage = (e) => {
+    const value = e.target.value;
+    setMessage(value);
 
-  if (error) return <div style={styles.error}>⚠️ {error}</div>;
+    if (!value.trim()) 
+    {
+       socket.emit("stop_typing", {
+        groupId: "messages",
+        userId: MY_USER_ID,
+      });
+      chatRef.current=false;
+    }
+    if(!chatRef.current)
+    {
+      chatRef.current=true;
+        socket.emit("typing_message", {
+      groupId: "messages",
+      userId: MY_USER_ID,
+    });
+    }
+
+  
+
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+
+    typingTimerRef.current = setTimeout(() => {
+      socket.emit("stop_typing", {
+        groupId: "messages",
+        userId: MY_USER_ID,
+      });
+      chatRef.current=false;
+    }, 1200);
+  };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <div style={styles.statusDot}></div>
-        <h2 style={styles.headerTitle}>Global Chat</h2>
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "450px",
+        margin: "40px auto",
+        background: "#18191a",
+        borderRadius: "16px",
+        display: "flex",
+        flexDirection: "column",
+        height: "85vh",
+        fontFamily: "Segoe UI",
+        overflow: "hidden",
+      }}
+    >
+      {/* HEADER */}
+      <div
+        style={{
+          padding: "12px",
+          background: "#242526",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+        }}
+      >
+        <h3 style={{ color: "#fff", margin: 0 }}>Global Chat</h3>
+        <h4 style={{ color: "#fff", margin: 0 }}>{userOnline} are Online</h4>
       </div>
 
-      <div style={styles.chatBox}>
-        {received.map((msg, index) => {
+      {/* TYPING */}
+      {typing && (
+        <div style={{ padding: "5px 12px", color: "#45bdff", fontSize: 13 }}>
+          {typing}
+        </div>
+      )}
+
+      {/* CHAT AREA */}
+      <div
+        style={{
+          flex: 1,
+          padding: "12px",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+        }}
+      >
+        {received.map((msg, i) => {
           const isMe = msg.userId === MY_USER_ID;
+
           return (
             <div
-              key={index}
+              key={i}
               style={{
-                ...styles.messageWrapper,
-                alignItems: isMe ? "flex-end" : "flex-start",
+                display: "flex",
+                justifyContent: isMe ? "flex-end" : "flex-start",
               }}
             >
               <div
                 style={{
-                  ...styles.message,
-                  backgroundColor: isMe ? "#0084ff" : "#e4e6eb",
-                  color: isMe ? "#fff" : "#000",
-                  borderRadius: isMe ? "18px 18px 2px 18px" : "18px 18px 18px 2px",
+                  maxWidth: "70%",
+                  padding: "10px 12px",
+                  borderRadius: "12px",
+                  background: isMe ? "#0084ff" : "#3a3b3c",
+                  color: "#fff",
+                  fontSize: "14px",
                 }}
               >
-                {!isMe && <strong style={styles.sender}>{msg.userId}</strong>}
-                <p style={styles.msgText}>{msg.message}</p>
+                {!isMe && (
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>
+                    {msg.userId}
+                  </div>
+                )}
+                {msg.message}
               </div>
             </div>
           );
         })}
+
         <div ref={chatEndRef} />
       </div>
 
-      <div style={styles.inputContainer}>
+      {/* INPUT */}
+      <div
+        style={{
+          display: "flex",
+          padding: "10px",
+          background: "#242526",
+          gap: "10px",
+        }}
+      >
         <input
-          style={styles.input}
-          type="text"
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Aa"
+          onChange={handleMessage}
+          placeholder="Type a message..."
+          style={{
+            flex: 1,
+            padding: "10px",
+            borderRadius: "20px",
+            border: "none",
+            outline: "none",
+            background: "#3a3b3c",
+            color: "#fff",
+          }}
         />
-        <button 
-          style={{...styles.button, opacity: message.trim() ? 1 : 0.5}} 
+
+        <button
           onClick={sendMessage}
+          style={{
+            padding: "10px 15px",
+            borderRadius: "20px",
+            border: "none",
+            background: "#0084ff",
+            color: "#fff",
+            cursor: "pointer",
+          }}
         >
           Send
         </button>
@@ -121,108 +260,3 @@ function App() {
 }
 
 export default App;
-
-const styles = {
-  container: {
-    width: "100%",
-    maxWidth: "450px",
-    margin: "40px auto",
-    backgroundColor: "#18191a", // Darker background
-    borderRadius: "16px",
-    display: "flex",
-    flexDirection: "column",
-    height: "85vh",
-    fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-    boxShadow: "0 12px 36px rgba(0,0,0,0.3)",
-    overflow: "hidden",
-  },
-  header: {
-    padding: "15px 20px",
-    backgroundColor: "#242526",
-    borderBottom: "1px solid #3e4042",
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-  },
-  headerTitle: {
-    fontSize: "18px",
-    margin: 0,
-    fontWeight: "700",
-    color: "#e4e6eb",
-  },
-  statusDot: {
-    width: "10px",
-    height: "10px",
-    backgroundColor: "#31a24c",
-    borderRadius: "50%",
-    boxShadow: "0 0 8px rgba(49, 162, 76, 0.5)",
-  },
-  chatBox: {
-    flex: 1,
-    padding: "20px",
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-    backgroundColor: "#18191a",
-  },
-  messageWrapper: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-  },
-  message: {
-    maxWidth: "75%",
-    padding: "10px 14px",
-    fontSize: "15px",
-    lineHeight: "1.4",
-  },
-  sender: {
-    fontSize: "12px",
-    fontWeight: "700",
-    display: "block",
-    marginBottom: "4px",
-    color: "#45bdff", // Bright Blue/Cyan so it's readable on gray/black
-    textTransform: "capitalize",
-  },
-  msgText: {
-    margin: 0,
-    wordWrap: "break-word",
-  },
-  inputContainer: {
-    padding: "15px",
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    backgroundColor: "#242526",
-    borderTop: "1px solid #3e4042",
-  },
-  input: {
-    flex: 1,
-    padding: "12px 16px",
-    borderRadius: "20px",
-    border: "none",
-    backgroundColor: "#3a3b3c",
-    color: "#e4e6eb",
-    fontSize: "15px",
-    outline: "none",
-  },
-  button: {
-    padding: "8px 16px",
-    border: "none",
-    backgroundColor: "transparent",
-    color: "#2e89ff",
-    fontWeight: "600",
-    fontSize: "15px",
-    cursor: "pointer",
-  },
-  error: {
-    color: "#f35369",
-    backgroundColor: "rgba(243, 83, 105, 0.1)",
-    padding: "15px",
-    margin: "20px auto",
-    borderRadius: "8px",
-    width: "fit-content",
-    border: "1px solid #f35369",
-  },
-};
